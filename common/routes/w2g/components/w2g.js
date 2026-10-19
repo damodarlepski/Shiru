@@ -97,6 +97,7 @@ export class W2GClient extends EventTarget {
     debug(`W2GClient: ${this.code}, ${this.isHost}`)
 
     this.#p2pt = new P2PT(W2GClient.#announce, this.code)
+    this.#p2pt._rtcConfig = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:global.stun.twilio.com:3478'] }] } // p2pt@1.6 defaults to no STUN servers, which prevents peers behind NAT from connecting.
 
     this.#wireEvents()
     this.#p2pt.start().catch(err => debug('p2pt start failed: %o', err))
