@@ -1,0 +1,126 @@
+name: Custom Build
+
+# Unsigned, unpublished builds for personal use. Installers are uploaded as workflow artifacts.
+on:
+  push:
+    branches: ['claude/relaxed-brown-36a48j']
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '24.19.0'
+  PNPM_VERSION: '10.34.1'
+
+jobs:
+  build-electron:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: windows
+            args: --win
+          - os: ubuntu-latest
+            name: linux
+            args: --linux AppImage deb
+          - os: macos-latest
+            name: macos
+            args: --mac
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install Setuptools for Python (macOS only)
+        if: matrix.name == 'macos'
+        run: pip3 install setuptools --break-system-packages
+
+      - name: Install dependencies
+        run: |
+          cd electron
+          pnpm install --frozen-lockfile
+
+      - name: Build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          cd electron
+          npm run web:build
+          npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiru-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            electron/dist/*.exe
+            electron/dist/*.AppImage
+            electron/dist/*.deb
+            electron/dist/*.dmg
+            electron/dist/*.zip
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./capacitor
+
+    steps:
+      - name: Free Disk Space
+        working-directory: .
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+            /opt/ghc /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af > /dev/null
+
+      - name: Check out Git repository
+        uses: actions/checkout@v6
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          check-latest: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Native + Web
+        run: pnpm run build:app
+
+      # Debug builds are signed with the default debug key and install as watch.shiru.dev alongside the official app.
+      - name: Build Android APK
+        run: cd android && chmod +x ./gradlew && ./gradlew assembleDebug
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shiru-android
+          if-no-files-found: error
+          path: capacitor/android/app/build/outputs/apk/debug/*.apk
